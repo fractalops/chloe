@@ -1,0 +1,25 @@
+version: 2
+
+linters:
+  enable:
+    - bodyclose
+    - goconst
+    - goprintffuncname
+    - gosec
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - noctx
+    - nolintlint
+    - unconvert
+    - unparam
+    - whitespace
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - goimports

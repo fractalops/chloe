@@ -1,0 +1,46 @@
+# Binaries
+chloe
+csm
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+*.coverprofile
+
+# Build outputs
+dist/
+build/
+*.tar.gz
+*.zip
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs & cache
+*.log
+.cache/
+
+# Temp
+tmp/
+temp/
+
+# Go workspace
+go.work
+go.work.sum
