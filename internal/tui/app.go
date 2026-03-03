@@ -380,40 +380,45 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Detail pane: j/k for bubble-jump navigation, o for open files
 	if m.focusPane == paneDetail {
-		switch {
-		case key.Matches(msg, keys.OpenFiles):
-			if m.detailSession != nil && m.detailSession.PID > 0 {
-				return m, loadOpenFilesCmd(m.detailSession.PID)
-			}
-			return m, nil
-		case key.Matches(msg, keys.Down):
-			if m.selectedBubble == -1 && len(m.bubbleRegions) > 0 {
-				// From metadata section, enter bubble navigation
-				m.selectedBubble = 0
-				m.refreshDetailViewport()
-				m.scrollToBubble(m.selectedBubble)
-			} else if m.selectedBubble < len(m.bubbleRegions)-1 {
-				m.selectedBubble++
-				m.refreshDetailViewport()
-				m.scrollToBubble(m.selectedBubble)
-			}
-			return m, nil
-		case key.Matches(msg, keys.Up):
-			if m.selectedBubble == 0 {
-				// Deselect and scroll to top (metadata section)
-				m.selectedBubble = -1
-				m.refreshDetailViewport()
-				m.viewport.GotoTop()
-			} else if m.selectedBubble > 0 {
-				m.selectedBubble--
-				m.refreshDetailViewport()
-				m.scrollToBubble(m.selectedBubble)
-			}
-			return m, nil
-		}
+		return m.handleDetailKey(msg)
 	}
 
 	// Fallback: forward to viewport
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.OpenFiles):
+		if m.detailSession != nil && m.detailSession.PID > 0 {
+			return m, loadOpenFilesCmd(m.detailSession.PID)
+		}
+		return m, nil
+	case key.Matches(msg, keys.Down):
+		if m.selectedBubble == -1 && len(m.bubbleRegions) > 0 {
+			m.selectedBubble = 0
+		} else if m.selectedBubble < len(m.bubbleRegions)-1 {
+			m.selectedBubble++
+		} else {
+			return m, nil
+		}
+		m.refreshDetailViewport()
+		m.scrollToBubble(m.selectedBubble)
+		return m, nil
+	case key.Matches(msg, keys.Up):
+		if m.selectedBubble == 0 {
+			m.selectedBubble = -1
+			m.refreshDetailViewport()
+			m.viewport.GotoTop()
+		} else if m.selectedBubble > 0 {
+			m.selectedBubble--
+			m.refreshDetailViewport()
+			m.scrollToBubble(m.selectedBubble)
+		}
+		return m, nil
+	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd

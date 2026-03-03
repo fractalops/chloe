@@ -120,27 +120,29 @@ func collectStats(line *jsonlLine, raw []byte, stats *SessionStats) {
 	}
 
 	// Token usage from assistant messages
-	if line.Type == roleAssistant {
-		var al struct {
-			Message *statMsg `json:"message"`
-		}
-		if json.Unmarshal(raw, &al) == nil && al.Message != nil {
-			if stats.Model == "" && al.Message.Model != "" {
-				stats.Model = al.Message.Model
-			}
-			if u := al.Message.Usage; u != nil {
-				stats.InputTokens += u.InputTokens
-				stats.OutputTokens += u.OutputTokens
-				stats.CacheReadTokens += u.CacheReadInputTokens
-				stats.CacheCreateTokens += u.CacheCreationInputTokens
-			}
-		}
+	if line.Type != roleAssistant {
+		return
+	}
+	var al struct {
+		Message *statMsg `json:"message"`
+	}
+	if json.Unmarshal(raw, &al) != nil || al.Message == nil {
+		return
+	}
+	if stats.Model == "" && al.Message.Model != "" {
+		stats.Model = al.Message.Model
+	}
+	if u := al.Message.Usage; u != nil {
+		stats.InputTokens += u.InputTokens
+		stats.OutputTokens += u.OutputTokens
+		stats.CacheReadTokens += u.CacheReadInputTokens
+		stats.CacheCreateTokens += u.CacheCreationInputTokens
 	}
 }
 
 // messageBlock is a parsed content block from a JSONL message.
 type messageBlock struct {
-	kind     string // "text", "tool_use", "tool_result"
+	kind     string // blockTypeText, "tool_use", "tool_result"
 	text     string // plain text content
 	toolName string // tool_use only
 	toolArgs []toolArg
@@ -171,7 +173,7 @@ func parseMessageBlocks(raw json.RawMessage, cwd string) ([]messageBlock, bool) 
 		if text == "" {
 			return nil, false
 		}
-		return []messageBlock{{kind: "text", text: text}}, false
+		return []messageBlock{{kind: blockTypeText, text: text}}, false
 	}
 
 	// Array of content blocks
@@ -192,13 +194,13 @@ func parseMessageBlocks(raw json.RawMessage, cwd string) ([]messageBlock, bool) 
 			continue
 		}
 		switch base.Type {
-		case "text":
+		case blockTypeText:
 			var tb struct {
 				Text string `json:"text"`
 			}
 			if json.Unmarshal(blockRaw, &tb) == nil && tb.Text != "" {
 				hasText = true
-				blocks = append(blocks, messageBlock{kind: "text", text: tb.Text})
+				blocks = append(blocks, messageBlock{kind: blockTypeText, text: tb.Text})
 			}
 		case "tool_use":
 			var tu struct {
@@ -233,7 +235,7 @@ func formatBlocks(blocks []messageBlock, toolArgMax, toolResultMax int) string {
 	var parts []string
 	for _, b := range blocks {
 		switch b.kind {
-		case "text":
+		case blockTypeText:
 			parts = append(parts, b.text)
 		case "tool_use":
 			args := formatArgs(b.toolArgs, toolArgMax)
@@ -306,7 +308,7 @@ func extractToolResult(raw json.RawMessage, cwd string) string {
 	}
 	if json.Unmarshal(raw, &blocks) == nil {
 		for _, b := range blocks {
-			if b.Type == "text" && b.Text != "" {
+			if b.Type == blockTypeText && b.Text != "" {
 				return shortenCwd(b.Text, cwd)
 			}
 		}

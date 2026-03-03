@@ -12,6 +12,7 @@ import (
 const (
 	roleUser      = "user"
 	roleAssistant = "assistant"
+	blockTypeText = "text"
 )
 
 // Session represents a Claude Code session parsed from a JSONL file.
@@ -183,7 +184,7 @@ func extractMessageText(raw json.RawMessage) string {
 	}
 	if err := json.Unmarshal(body.Content, &blocks); err == nil {
 		for _, b := range blocks {
-			if b.Type == "text" && b.Text != "" {
+			if b.Type == blockTypeText && b.Text != "" {
 				return truncate(b.Text, 100)
 			}
 		}

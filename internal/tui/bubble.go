@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const roleUser = "user"
+
 var (
 	userBubbleStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -112,7 +114,7 @@ func renderChatBubble(role, content string, totalWidth int, selected bool) strin
 
 	// Choose bubble style — override border color when selected
 	var bubbleStyle lipgloss.Style
-	if role == "user" {
+	if role == roleUser {
 		bubbleStyle = userBubbleStyle
 	} else {
 		bubbleStyle = assistantBubbleStyle
@@ -123,7 +125,7 @@ func renderChatBubble(role, content string, totalWidth int, selected bool) strin
 
 	var result strings.Builder
 
-	if role == "user" {
+	if role == roleUser {
 		label := userLabelStyle.Render("▶ You")
 		bubble := bubbleStyle.Width(fitWidth - 2).Render(bubbleContent)
 
@@ -160,7 +162,7 @@ func renderFullBubble(role, content string, width int) string {
 	}
 
 	var result strings.Builder
-	if role == "user" {
+	if role == roleUser {
 		label := userLabelStyle.Render("▶ You")
 		result.WriteString("  " + label + "\n\n")
 	} else {
