@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fractalops/chloe/internal/claude"
-	"github.com/fractalops/chloe/internal/util"
 )
 
 // Session status values.
@@ -24,21 +23,18 @@ const (
 	colStatusWidth  = 5
 	colProjectWidth = 22
 	colAgeWidth     = 4
-	colPadding      = 12 // separators + margins
+	colPadding      = 16 // separators + margins
 )
 
 type groupMode int
 
 const (
 	groupAll groupMode = iota
-	groupByProject
 	groupActiveOnly
 )
 
 func (g groupMode) String() string {
 	switch g {
-	case groupByProject:
-		return "by-project"
 	case groupActiveOnly:
 		return "active-only"
 	default:
@@ -119,7 +115,7 @@ func (d sessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	msgStr := messageStyle.Render(fmt.Sprintf("%-*s", msgWidth, msg))
 
 	// Age
-	age := util.RelativeTime(s.LastActive)
+	age := claude.RelativeTime(s.LastActive)
 	ageStr := ageStyle.Render(fmt.Sprintf("%*s", colAgeWidth, age))
 
 	row := fmt.Sprintf(" %s │ %s │ %s │ %s", status, projStr, msgStr, ageStr)

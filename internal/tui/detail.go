@@ -5,19 +5,29 @@ import (
 	"strings"
 
 	"github.com/fractalops/chloe/internal/claude"
-	"github.com/fractalops/chloe/internal/util"
 )
+
+// BubbleRegion maps a line range in the rendered detail content to a message index.
+type BubbleRegion struct {
+	StartLine int // inclusive
+	EndLine   int // exclusive
+	MsgIndex  int // index into the conversation messages slice
+}
 
 // renderDetailContent builds a single string with metadata, stats, and
 // conversation bubbles, suitable for viewport.SetContent().
-func renderDetailContent(s claude.Session, msgs []claude.ConversationMessage, width int) string {
+// It returns the rendered string and a slice of BubbleRegion for navigation.
+func renderDetailContent(s claude.Session, msgs []claude.ConversationMessage, width int, selectedBubble int, burnRate float64) (string, []BubbleRegion) {
 	var b strings.Builder
+	var regions []BubbleRegion
 
-	// Metadata
-	fields := []struct {
+	type field struct {
 		label string
 		value string
-	}{
+	}
+
+	// Metadata
+	fields := []field{
 		{"ID", s.ID},
 		{"Project", claude.ShortenPath(s.Project)},
 		{"CWD", s.CWD},
@@ -26,19 +36,29 @@ func renderDetailContent(s claude.Session, msgs []claude.ConversationMessage, wi
 		{"Slug", s.Slug},
 		{"Status", s.Status},
 		{"Started", s.StartedAt.Format("2006-01-02 15:04:05")},
-		{"Last Active", util.RelativeTime(s.LastActive)},
+		{"Last Active", claude.RelativeTime(s.LastActive)},
 		{"Messages", fmt.Sprintf("%d lines", s.MessageCount)},
 	}
 	if s.PID > 0 {
-		fields = append(fields, struct {
-			label string
-			value string
-		}{"PID", fmt.Sprintf("%d", s.PID)})
+		fields = append(fields,
+			field{"PID", fmt.Sprintf("%d", s.PID)},
+			field{"CPU", fmt.Sprintf("%.1f%%", s.CPUPct)},
+			field{"Memory", fmt.Sprintf("%.1f%% (%d MB)", s.MemPct, s.RSSKB/1024)},
+			field{"Open Files", fmt.Sprintf("%d", s.OpenFiles)},
+		)
+		if burnRate > 0 {
+			fields = append(fields, field{"Burn Rate", fmt.Sprintf("%.0f tok/min", burnRate)})
+		}
 	}
 
 	for _, f := range fields {
 		label := detailLabelStyle.Render(f.label + ":")
-		value := detailValueStyle.Render(f.value)
+		var value string
+		if f.label == "Burn Rate" {
+			value = burnRateStyle.Render(f.value)
+		} else {
+			value = detailValueStyle.Render(f.value)
+		}
 		b.WriteString(fmt.Sprintf("  %s %s\n", label, value))
 	}
 
@@ -47,18 +67,11 @@ func renderDetailContent(s claude.Session, msgs []claude.ConversationMessage, wi
 		b.WriteString("\n")
 		b.WriteString(strings.Repeat("─", width) + "\n")
 
-		costStr := fmt.Sprintf("$%.2f", st.CostUSD)
-		if st.CostUSD >= 1.0 {
-			costStr = costStyle.Render(costStr)
-		} else {
-			costStr = detailValueStyle.Render(costStr)
-		}
 		modelStr := ""
 		if st.Model != "" {
 			modelStr = detailValueStyle.Render(st.Model)
 		}
-		b.WriteString(fmt.Sprintf("  %s %s    %s %s\n",
-			detailLabelStyle.Render("Cost:"), costStr,
+		b.WriteString(fmt.Sprintf("  %s %s\n",
 			detailLabelStyle.Render("Model:"), modelStr))
 
 		durationStr := formatDuration(st.TotalDurationMs)
@@ -77,12 +90,24 @@ func renderDetailContent(s claude.Session, msgs []claude.ConversationMessage, wi
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("─", width) + "\n\n")
 
+	// Track line count for bubble regions
+	currentLine := strings.Count(b.String(), "\n")
+
 	// Conversation bubbles
-	for _, msg := range msgs {
-		b.WriteString(renderChatBubble(msg.Role, msg.Content, width))
+	for i, msg := range msgs {
+		selected := i == selectedBubble
+		startLine := currentLine
+		bubbleStr := renderChatBubble(msg.Role, msg.Content, width, selected)
+		b.WriteString(bubbleStr)
+		currentLine += strings.Count(bubbleStr, "\n")
+		regions = append(regions, BubbleRegion{
+			StartLine: startLine,
+			EndLine:   currentLine,
+			MsgIndex:  i,
+		})
 	}
 
-	return b.String()
+	return b.String(), regions
 }
 
 // formatTokens formats a token count with K/M suffixes.

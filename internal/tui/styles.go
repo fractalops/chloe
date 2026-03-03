@@ -39,6 +39,10 @@ var (
 	ageStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888"))
 
+	burnRateStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFAA00")).
+			Bold(true)
+
 	footerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666666")).
 			Padding(0, 1)
@@ -51,10 +55,6 @@ var (
 	detailValueStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#CCCCCC"))
 
-	costStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF4444")).
-			Bold(true)
-
 	focusedPaneStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#FF6600"))
@@ -62,4 +62,15 @@ var (
 	blurredPaneStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#444444"))
+
+	selectedBubbleColor = lipgloss.Color("#FFFF00")
+
+	overlayStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(lipgloss.Color("#FF6600")).
+			Padding(0, 1)
+
+	overlayTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FF6600"))
 )
