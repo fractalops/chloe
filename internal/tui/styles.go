@@ -73,4 +73,33 @@ var (
 	overlayTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("#FF6600"))
+
+	// Enrichment styles
+	outcomeGoodStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#00FF00")).
+				Bold(true)
+
+	outcomeMidStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFAA00")).
+			Bold(true)
+
+	outcomeBadStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF4444")).
+			Bold(true)
+
+	sectionTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FF6600"))
+
+	taskCompleteStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#00FF00"))
+
+	taskInProgressStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFAA00"))
+
+	taskPendingStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#888888"))
+
+	tokenColumnStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFAA00"))
 )

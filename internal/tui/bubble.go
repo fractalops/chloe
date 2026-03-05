@@ -66,6 +66,38 @@ func renderGlamourMarkdown(content string, width int) string {
 	return strings.TrimRight(out, "\n")
 }
 
+// renderMixedContent splits content into markdown text and tool lines (-> / <-),
+// rendering only the text sections through glamour and keeping tool lines as-is.
+func renderMixedContent(content string, width int) string {
+	lines := strings.Split(content, "\n")
+	var result strings.Builder
+	var textBuf []string
+
+	flush := func() {
+		if len(textBuf) > 0 {
+			md := strings.Join(textBuf, "\n")
+			result.WriteString(renderGlamourMarkdown(md, width))
+			result.WriteString("\n")
+			textBuf = textBuf[:0]
+		}
+	}
+
+	toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "-> ") || strings.HasPrefix(line, "<- ") {
+			flush()
+			result.WriteString(toolStyle.Render(line))
+			result.WriteString("\n")
+		} else {
+			textBuf = append(textBuf, line)
+		}
+	}
+	flush()
+
+	return strings.TrimRight(result.String(), "\n")
+}
+
 // renderChatBubble renders a single message as an aligned chat bubble.
 // User messages align left, assistant messages align right.
 // When selected is true, the bubble border is highlighted yellow.
@@ -83,8 +115,8 @@ func renderChatBubble(role, content string, totalWidth int, selected bool) strin
 		contentWidth = 10
 	}
 
-	// Render markdown via glamour
-	rendered := renderGlamourMarkdown(content, contentWidth)
+	// Render markdown via glamour, but skip tool lines (-> / <-)
+	rendered := renderMixedContent(content, contentWidth)
 
 	// Truncate very long messages
 	lines := strings.Split(rendered, "\n")
@@ -154,7 +186,6 @@ func renderChatBubble(role, content string, totalWidth int, selected bool) strin
 }
 
 // renderFullBubble renders a message without truncation for the overlay view.
-// Tool lines (-> / <-) are rendered as plain text to avoid expensive markdown parsing.
 func renderFullBubble(role, content string, width int) string {
 	contentWidth := width - 4
 	if contentWidth < 10 {
@@ -163,35 +194,13 @@ func renderFullBubble(role, content string, width int) string {
 
 	var result strings.Builder
 	if role == roleUser {
-		label := userLabelStyle.Render("▶ You")
-		result.WriteString("  " + label + "\n\n")
+		result.WriteString("  " + userLabelStyle.Render("▶ You") + "\n\n")
 	} else {
-		label := assistantLabelStyle.Render("Claude ◀")
-		result.WriteString("  " + label + "\n\n")
+		result.WriteString("  " + assistantLabelStyle.Render("Claude ◀") + "\n\n")
 	}
 
-	// Split content into text sections and tool lines.
-	// Only run glamour on text sections — tool output is plain text.
-	lines := strings.Split(content, "\n")
-	var textBuf []string
-	flush := func() {
-		if len(textBuf) > 0 {
-			md := strings.Join(textBuf, "\n")
-			result.WriteString(renderGlamourMarkdown(md, contentWidth))
-			result.WriteString("\n")
-			textBuf = textBuf[:0]
-		}
-	}
-	for _, line := range lines {
-		if strings.HasPrefix(line, "-> ") || strings.HasPrefix(line, "<- ") {
-			flush()
-			result.WriteString(line)
-			result.WriteString("\n")
-		} else {
-			textBuf = append(textBuf, line)
-		}
-	}
-	flush()
+	result.WriteString(renderMixedContent(content, contentWidth))
+	result.WriteString("\n")
 
 	return result.String()
 }

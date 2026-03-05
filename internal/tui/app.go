@@ -5,9 +5,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -50,13 +51,13 @@ type Model struct {
 	overlayVP     viewport.Model
 	overlayMsgIdx int
 
+	statsCache     *claude.StatsCache
 	tokenSnapshots map[string]tokenSnapshot
 	burnRates      map[string]float64
 
-	searchMode   bool
-	searchInput  textinput.Model
-	searchActive bool // true when displaying search results
-	searchQuery  string
+	help          help.Model
+	spinner       spinner.Model
+	detailLoading bool
 
 	width, height int
 	ready         bool
@@ -66,18 +67,13 @@ type Model struct {
 type sessionLoadedMsg struct {
 	sessions    []claude.Session
 	tokenCounts map[string]int64
+	statsCache  *claude.StatsCache
 }
 
 // detailLoadedMsg is sent when a session's detail has been loaded.
 type detailLoadedMsg struct {
 	session claude.Session
 	msgs    []claude.ConversationMessage
-}
-
-// searchResultMsg is sent when search completes.
-type searchResultMsg struct {
-	query    string
-	sessions []claude.Session
 }
 
 // openFilesMsg is sent when open files for a PID have been loaded.
@@ -103,17 +99,24 @@ func NewModel() Model {
 
 	ovp := viewport.New(0, 0)
 
-	ti := textinput.New()
-	ti.Prompt = "Search: "
-	ti.PromptStyle = footerStyle
-	ti.TextStyle = footerStyle
-	ti.CharLimit = 256
+	sp := spinner.New()
+	sp.Spinner = spinner.MiniDot
+	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6600"))
+
+	h := help.New()
+	h.Styles.ShortKey = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	h.Styles.ShortDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	h.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	h.Styles.FullKey = h.Styles.ShortKey
+	h.Styles.FullDesc = h.Styles.ShortDesc
+	h.Styles.FullSeparator = h.Styles.ShortSeparator
 
 	return Model{
 		list:           l,
 		viewport:       vp,
 		overlayVP:      ovp,
-		searchInput:    ti,
+		help:           h,
+		spinner:        sp,
 		focusPane:      paneList,
 		selectedBubble: -1,
 		group:          groupAll,
@@ -124,7 +127,7 @@ func NewModel() Model {
 
 // Init loads sessions on startup and starts the auto-refresh ticker.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadSessions, tickCmd())
+	return tea.Batch(loadSessions, tickCmd(), m.spinner.Tick)
 }
 
 func tickCmd() tea.Cmd {
@@ -159,14 +162,9 @@ func loadSessions() tea.Msg {
 		}
 	}
 
-	return sessionLoadedMsg{sessions: sessions, tokenCounts: tokenCounts}
-}
+	statsCache := claude.LoadStatsCache()
 
-func searchCmd(sessions []claude.Session, query string) tea.Cmd {
-	return func() tea.Msg {
-		results := claude.SearchSessions(sessions, query)
-		return searchResultMsg{query: query, sessions: results}
-	}
+	return sessionLoadedMsg{sessions: sessions, tokenCounts: tokenCounts, statsCache: statsCache}
 }
 
 func loadOpenFilesCmd(pid int) tea.Cmd {
@@ -190,6 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.Width = m.width - 2
 		m.updateLayout()
 		if m.overlayActive {
 			m.resizeOverlay()
@@ -197,16 +196,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		return m, nil
 
-	case searchResultMsg:
-		m.searchActive = true
-		m.searchQuery = msg.query
-		items := sessionsToItems(msg.sessions)
-		m.list.SetItems(items)
-		return m, nil
-
 	case tickMsg:
-		// Don't refresh while filtering, searching, or viewing search results
-		if m.list.FilterState() != list.Unfiltered || m.searchMode || m.searchActive {
+		// Don't refresh while filtering
+		if m.list.FilterState() != list.Unfiltered {
 			return m, tickCmd()
 		}
 		return m, tea.Batch(loadSessions, tickCmd())
@@ -217,6 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.sessions = msg.sessions
+		m.statsCache = msg.statsCache
 
 		// Compute burn rates from token count deltas
 		now := time.Now()
@@ -255,16 +248,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case detailLoadedMsg:
+		wasLoaded := m.detailLoaded
 		m.detailSession = &msg.session
 		m.detailMsgs = msg.msgs
 		m.detailLoaded = true
+		m.detailLoading = false
 		m.selectedBubble = -1
-		if len(msg.msgs) > 0 {
-			m.selectedBubble = 0
+		// First load: switch focus to detail pane
+		if !wasLoaded {
+			m.focusPane = paneDetail
 		}
 		m.updateLayout()
 		m.refreshDetailViewport()
-		m.viewport.GotoTop()
+		m.viewport.SetYOffset(0)
+		return m, nil
+
+	case spinner.TickMsg:
+		if !m.ready || m.detailLoading || len(m.sessions) == 0 {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -278,11 +282,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.list, cmd = m.list.Update(msg)
 			return m, cmd
-		}
-
-		// Search mode: intercept all keys for input
-		if m.searchMode {
-			return m.handleSearchKey(msg)
 		}
 
 		return m.handleKey(msg)
@@ -300,18 +299,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case key.Matches(msg, keys.Tab):
-		if m.focusPane == paneList {
-			m.focusPane = paneDetail
-		} else {
-			// Tabbing back to list closes detail and restores wide layout
-			m.focusPane = paneList
-			m.detailLoaded = false
-			m.detailSession = nil
-			m.detailMsgs = nil
-			m.detailContent = ""
+		if m.detailLoaded {
+			if m.focusPane == paneList {
+				m.focusPane = paneDetail
+			} else {
+				m.focusPane = paneList
+			}
+			m.updateLayout()
+			m.refreshDetailViewport()
 		}
-		m.updateLayout()
-		m.refreshDetailViewport()
 		return m, nil
 
 	case key.Matches(msg, keys.Group):
@@ -325,56 +321,68 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Resume):
 		s := m.selectedSession()
 		if s != nil {
-			cmd, err := makeResumeCmd(*s)
-			if err != nil {
-				return m, nil
-			}
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return sessionLoadedMsg{} })
+			cmd := launchSession(*s)
+			return m, cmd
 		}
 		return m, nil
 
-	case key.Matches(msg, keys.Search):
-		m.searchMode = true
-		m.searchInput.Reset()
-		m.searchInput.Focus()
-		return m, nil
+	case key.Matches(msg, keys.New):
+		cwd := ""
+		if s := m.selectedSession(); s != nil {
+			cwd = s.CWD
+		}
+		cmd := launchNewSession(cwd)
+		return m, cmd
 
 	case key.Matches(msg, keys.Escape):
-		if m.searchActive {
-			m.searchActive = false
-			m.searchQuery = ""
-			m.rebuildList()
-			return m, nil
-		}
 		if m.detailLoaded {
 			m.detailLoaded = false
 			m.detailSession = nil
 			m.detailMsgs = nil
 			m.detailContent = ""
 			m.focusPane = paneList
+			m.setCompactMode(false)
 			m.updateLayout()
 			return m, nil
 		}
 		return m, nil
 
 	case key.Matches(msg, keys.Enter):
+		if m.focusPane == paneDetail {
+			// Delegate to detail key handler for bubble mode / overlay
+			return m.handleDetailKey(msg)
+		}
 		if m.focusPane == paneList {
+			if m.detailLoaded {
+				// Detail already open — just switch focus to detail
+				m.focusPane = paneDetail
+				m.updateLayout()
+				m.refreshDetailViewport()
+				return m, nil
+			}
+			// Detail closed — load detail and switch to compact mode
 			s := m.selectedSession()
 			if s != nil {
-				return m, loadDetailCmd(*s)
+				m.detailLoading = true
+				m.setCompactMode(true)
+				return m, tea.Batch(loadDetailCmd(*s), m.spinner.Tick)
 			}
-		}
-		if m.focusPane == paneDetail && m.selectedBubble >= 0 && m.selectedBubble < len(m.detailMsgs) {
-			m.openOverlay(m.selectedBubble)
-			return m, nil
 		}
 		return m, nil
 	}
 
 	// Route navigation to focused pane
 	if m.focusPane == paneList {
+		prevIdx := m.list.Index()
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
+		// Auto-update detail when selection changes and detail is open
+		if m.detailLoaded && !m.detailLoading && m.list.Index() != prevIdx {
+			if s := m.selectedSession(); s != nil {
+				m.detailLoading = true
+				cmd = tea.Batch(cmd, loadDetailCmd(*s), m.spinner.Tick)
+			}
+		}
 		return m, cmd
 	}
 
@@ -396,52 +404,52 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, loadOpenFilesCmd(m.detailSession.PID)
 		}
 		return m, nil
-	case key.Matches(msg, keys.Down):
+
+	case key.Matches(msg, keys.Enter):
+		// Enter activates bubble mode or opens overlay
 		if m.selectedBubble == -1 && len(m.bubbleRegions) > 0 {
 			m.selectedBubble = 0
-		} else if m.selectedBubble < len(m.bubbleRegions)-1 {
-			m.selectedBubble++
-		} else {
+			m.refreshDetailViewport()
+			m.scrollToBubble(0)
 			return m, nil
 		}
-		m.refreshDetailViewport()
-		m.scrollToBubble(m.selectedBubble)
+		if m.selectedBubble >= 0 && m.selectedBubble < len(m.detailMsgs) {
+			m.openOverlay(m.selectedBubble)
+			return m, nil
+		}
 		return m, nil
+
+	case key.Matches(msg, keys.Down):
+		// In bubble mode: hop between bubbles
+		if m.selectedBubble >= 0 {
+			if m.selectedBubble < len(m.bubbleRegions)-1 {
+				m.selectedBubble++
+				m.refreshDetailViewport()
+				m.scrollToBubble(m.selectedBubble)
+			}
+			return m, nil
+		}
+		// Free-scroll mode: fall through to viewport
+
 	case key.Matches(msg, keys.Up):
-		if m.selectedBubble == 0 {
-			m.selectedBubble = -1
-			m.refreshDetailViewport()
-			m.viewport.GotoTop()
-		} else if m.selectedBubble > 0 {
+		// In bubble mode: hop between bubbles, k from first exits to free-scroll
+		if m.selectedBubble > 0 {
 			m.selectedBubble--
 			m.refreshDetailViewport()
 			m.scrollToBubble(m.selectedBubble)
-		}
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
-}
-
-func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEnter:
-		query := m.searchInput.Value()
-		m.searchMode = false
-		m.searchInput.Blur()
-		if query == "" {
 			return m, nil
 		}
-		return m, searchCmd(m.sessions, query)
-	case tea.KeyEscape:
-		m.searchMode = false
-		m.searchInput.Blur()
-		m.searchInput.Reset()
-		return m, nil
+		if m.selectedBubble == 0 {
+			m.selectedBubble = -1
+			m.refreshDetailViewport()
+			m.viewport.SetYOffset(0)
+			return m, nil
+		}
+		// Free-scroll mode: fall through to viewport
 	}
+
 	var cmd tea.Cmd
-	m.searchInput, cmd = m.searchInput.Update(msg)
+	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
 }
 
@@ -474,6 +482,13 @@ func (m *Model) rebuildList() {
 	m.list.SetItems(items)
 }
 
+func (m *Model) setCompactMode(compact bool) {
+	delegate := sessionDelegate{compact: compact}
+	m.list.SetDelegate(delegate)
+	// Re-set items to force height recalculation
+	m.list.SetItems(m.list.Items())
+}
+
 func (m *Model) updateLayout() {
 	listW := m.listPaneWidth()
 	detailW := m.detailPaneWidth()
@@ -483,7 +498,7 @@ func (m *Model) updateLayout() {
 		innerH = 1
 	}
 
-	m.list.SetSize(listW-2, innerH)
+	m.list.SetSize(listW-2, innerH-1) // -1 for column header row
 	m.viewport.Width = detailW - 2
 	m.viewport.Height = innerH
 }
@@ -492,7 +507,7 @@ func (m Model) listPaneWidth() int {
 	if !m.detailLoaded {
 		return int(float64(m.width) * 0.90)
 	}
-	return int(float64(m.width) * 0.30)
+	return int(float64(m.width) * 0.50)
 }
 
 func (m Model) detailPaneWidth() int {
@@ -502,7 +517,11 @@ func (m Model) detailPaneWidth() int {
 // View renders the split-pane layout.
 func (m Model) View() string {
 	if !m.ready {
-		return "Loading..."
+		loading := m.spinner.View() + " Loading sessions…"
+		if m.width > 0 && m.height > 0 {
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, loading)
+		}
+		return loading
 	}
 
 	if m.overlayActive {
@@ -517,7 +536,7 @@ func (m Model) View() string {
 	}
 
 	// Header
-	header := statusHeader(m.sessions, m.width)
+	header := statusHeader(m.sessions, m.width, m.statsCache)
 
 	// List pane
 	var listStyle, detailStyle lipgloss.Style
@@ -529,11 +548,22 @@ func (m Model) View() string {
 		detailStyle = focusedPaneStyle.Width(detailW - 2).Height(innerH)
 	}
 
-	listView := listStyle.Render(m.list.View())
+	var listContent string
+	if len(m.sessions) == 0 {
+		loadingText := m.spinner.View() + " Loading sessions…"
+		listContent = lipgloss.Place(listW-2, innerH, lipgloss.Center, lipgloss.Center, loadingText)
+	} else {
+		colHeader := m.listColumnHeader(listW - 2)
+		listContent = colHeader + "\n" + m.list.View()
+	}
+	listView := listStyle.Render(listContent)
 
 	// Detail pane
 	var detailContent string
-	if m.detailSession != nil {
+	if m.detailLoading {
+		loadingText := m.spinner.View() + " Loading..."
+		detailContent = lipgloss.Place(detailW-2, innerH, lipgloss.Center, lipgloss.Center, loadingText)
+	} else if m.detailSession != nil {
 		detailContent = m.viewport.View()
 	} else {
 		hint := normalStyle.Foreground(lipgloss.Color("#666666")).Render("Select a session and press Enter")
@@ -545,26 +575,53 @@ func (m Model) View() string {
 
 	// Footer
 	var footer string
-	if m.searchMode {
-		footer = footerStyle.Render(m.searchInput.View())
-	} else if m.searchActive {
-		groupInfo := fmt.Sprintf("[%s]", m.group)
-		footer = footerStyle.Render(fmt.Sprintf(
-			"[search: %q — esc clear]  ↑↓ navigate  tab switch pane  enter detail  r resume  / filter  g %s  R refresh  q quit",
-			m.searchQuery, groupInfo))
-	} else if m.focusPane == paneDetail && m.detailLoaded {
-		footerText := "j/k bubble nav  enter expand  tab back  esc close  q quit"
+	if m.focusPane == paneDetail && m.detailLoaded {
+		dk := detailKeys()
 		if m.detailSession != nil && m.detailSession.PID > 0 {
-			footerText = "j/k bubble nav  enter expand  o open files  tab back  esc close  q quit"
+			dk.OpenFiles.SetEnabled(true)
+		} else {
+			dk.OpenFiles.SetEnabled(false)
 		}
-		footer = footerStyle.Render(footerText)
+		footer = footerStyle.Render(m.help.View(dk))
 	} else {
-		groupInfo := fmt.Sprintf("[%s]", m.group)
-		footer = footerStyle.Render(fmt.Sprintf(
-			"↑↓ navigate  tab switch pane  enter detail  r resume  / filter  s search  g %s  R refresh  q quit", groupInfo))
+		footer = footerStyle.Render(m.help.View(listKeys()))
 	}
 
 	return header + "\n" + body + "\n" + footer
+}
+
+// listColumnHeader returns a styled column header for the list pane.
+func (m Model) listColumnHeader(width int) string {
+	hs := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Bold(true)
+
+	if m.detailLoaded {
+		// Compact mode header
+		ageW := len("AGE")
+		projW := width - 1 - colStatusWidth - 2 - ageW // " STS  PROJECT...AGE"
+		if projW < 4 {
+			projW = 4
+		}
+		header := fmt.Sprintf(" %s  %s%s",
+			hs.Render(fmt.Sprintf("%-*s", colStatusWidth, " STS")),
+			hs.Render(fmt.Sprintf("%-*s", projW, "PROJECT")),
+			hs.Render(fmt.Sprintf("%*s", ageW, "AGE")),
+		)
+		return header
+	}
+
+	// Wide mode: style each column individually (matching data row ANSI structure)
+	descW := wideDescWidth(width)
+	header := wideRow(
+		hs.Render(fmt.Sprintf("%-*s", colStatusWidth, " STS")),
+		hs.Render(fmt.Sprintf("%-*s", colProjectWidth, "PROJECT")),
+		hs.Render(fmt.Sprintf("%-*s", descW, "DESCRIPTION")),
+		hs.Render(fmt.Sprintf("%*s", colTokenWidth, "TOKENS")),
+		hs.Render(fmt.Sprintf("%-*s", colOutcomeWidth, "")),
+		hs.Render(fmt.Sprintf("%*s", colAgeWidth, "AGE")),
+	)
+	return header
 }
 
 func statusOrder(status string) int {

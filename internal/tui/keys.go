@@ -7,14 +7,45 @@ type keyMap struct {
 	Down      key.Binding
 	Enter     key.Binding
 	Resume    key.Binding
+	New       key.Binding
 	Filter    key.Binding
-	Search    key.Binding
 	Tab       key.Binding
 	Group     key.Binding
 	Refresh   key.Binding
 	OpenFiles key.Binding
 	Escape    key.Binding
 	Quit      key.Binding
+}
+
+// ShortHelp implements help.KeyMap.
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Enter, k.Tab, k.Quit}
+}
+
+// FullHelp implements help.KeyMap.
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Enter, k.Tab},                  // navigation
+		{k.Filter, k.Resume, k.New, k.Group, k.Refresh}, // actions
+		{k.OpenFiles, k.Escape, k.Quit},                 // misc
+	}
+}
+
+// listKeys returns a keyMap with all bindings enabled (for the list pane).
+func listKeys() keyMap {
+	k := keys
+	return k
+}
+
+// detailKeys returns a keyMap scoped to the detail pane.
+func detailKeys() keyMap {
+	k := keys
+	k.Filter.SetEnabled(false)
+	k.Resume.SetEnabled(false)
+	k.New.SetEnabled(false)
+	k.Group.SetEnabled(false)
+	k.Refresh.SetEnabled(false)
+	return k
 }
 
 var keys = keyMap{
@@ -34,13 +65,13 @@ var keys = keyMap{
 		key.WithKeys("r"),
 		key.WithHelp("r", "resume"),
 	),
+	New: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "new session"),
+	),
 	Filter: key.NewBinding(
 		key.WithKeys("/"),
-		key.WithHelp("/", "filter"),
-	),
-	Search: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "search"),
+		key.WithHelp("/", "search"),
 	),
 	Tab: key.NewBinding(
 		key.WithKeys("tab"),
@@ -60,7 +91,7 @@ var keys = keyMap{
 	),
 	Escape: key.NewBinding(
 		key.WithKeys("esc"),
-		key.WithHelp("esc", "back"),
+		key.WithHelp("esc", "close detail"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q", "ctrl+c"),

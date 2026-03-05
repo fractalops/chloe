@@ -25,6 +25,7 @@ type Session struct {
 	GitBranch    string
 	Slug         string
 	FirstMsg     string    // First user message (truncated)
+	UserMsgs     string    // All user messages concatenated (for search)
 	StartedAt    time.Time // First message timestamp
 	LastActive   time.Time // File mtime
 	MessageCount int
@@ -38,6 +39,11 @@ type Session struct {
 
 	// Stats (populated by LoadSessionDetail)
 	Stats *SessionStats
+
+	// Enrichment (populated by ApplyEnrichment during bulk load)
+	Meta   *SessionMeta
+	Facets *SessionFacets
+	Tasks  []Task
 }
 
 // jsonlLine represents the minimal fields we parse from each JSONL line.
@@ -93,13 +99,10 @@ func ParseSessionFile(filePath string, project ProjectInfo) (*Session, error) {
 
 	lineCount := 0
 	foundMeta := false
+	var userMsgs strings.Builder
 
 	for scanner.Scan() {
 		lineCount++
-
-		if foundMeta {
-			continue // just counting lines
-		}
 
 		var line jsonlLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
@@ -107,6 +110,20 @@ func ParseSessionFile(filePath string, project ProjectInfo) (*Session, error) {
 		}
 
 		if line.Type != roleUser {
+			continue
+		}
+
+		msgText := extractMessageText(line.Message)
+
+		// Collect all user messages for search
+		if msgText != "" {
+			if userMsgs.Len() > 0 {
+				userMsgs.WriteByte(' ')
+			}
+			userMsgs.WriteString(msgText)
+		}
+
+		if foundMeta {
 			continue
 		}
 
@@ -121,13 +138,14 @@ func ParseSessionFile(filePath string, project ProjectInfo) (*Session, error) {
 		if t, parseErr := time.Parse(time.RFC3339Nano, line.Timestamp); parseErr == nil {
 			sess.StartedAt = t
 		}
-		sess.FirstMsg = extractMessageText(line.Message)
+		sess.FirstMsg = msgText
 		if line.SessionID == fileID {
 			foundMeta = true
 		}
 	}
 
 	sess.MessageCount = lineCount
+	sess.UserMsgs = userMsgs.String()
 	return sess, nil
 }
 
@@ -198,8 +216,8 @@ func truncate(s string, maxLen int) string {
 		s = s[:idx]
 	}
 	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		return s[:maxLen-1] + "…"
+	if runes := []rune(s); len(runes) > maxLen {
+		return string(runes[:maxLen-1]) + "…"
 	}
 	return s
 }
@@ -230,6 +248,8 @@ func LoadAllSessions() ([]Session, error) {
 			sessions = append(sessions, *sess)
 		}
 	}
+
+	ApplyEnrichment(sessions)
 
 	return sessions, nil
 }

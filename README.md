@@ -10,7 +10,7 @@ A beautiful TUI to spy on all your [Claude Code](https://docs.anthropic.com/en/d
 
 ## Features
 
-- **Live monitoring** — see real-time CPU, memory, token burn rate, and open files for every active session
+- **Process monitoring** — CPU, memory, token burn rate, and open files for active sessions
 - **Conversation viewer** — browse any session's messages with rendered markdown, expand to full content
 - **Resume sessions** — jump back into any session directly from the TUI
 - **Fuzzy search** — filter across project names, messages, and session IDs

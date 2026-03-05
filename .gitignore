@@ -44,3 +44,7 @@ temp/
 # Go workspace
 go.work
 go.work.sum
+
+# Local vendored forks (not used by build)
+bubbles/
+lipgloss/
