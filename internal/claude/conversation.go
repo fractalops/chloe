@@ -242,8 +242,8 @@ func formatBlocks(blocks []messageBlock, toolArgMax, toolResultMax int) string {
 			parts = append(parts, fmt.Sprintf("-> %s(%s)", b.toolName, args))
 		case "tool_result":
 			r := b.result
-			if toolResultMax > 0 && len(r) > toolResultMax {
-				r = r[:toolResultMax-3] + "..."
+			if runes := []rune(r); toolResultMax > 0 && len(runes) > toolResultMax {
+				r = string(runes[:toolResultMax-3]) + "..."
 			}
 			parts = append(parts, fmt.Sprintf("<- %s", r))
 		}
@@ -285,8 +285,8 @@ func formatArgs(args []toolArg, maxLen int) string {
 	parts := make([]string, 0, len(args))
 	for _, a := range args {
 		val := a.val
-		if maxLen > 0 && len(val) > maxLen {
-			val = val[:maxLen-3] + "..."
+		if runes := []rune(val); maxLen > 0 && len(runes) > maxLen {
+			val = string(runes[:maxLen-3]) + "..."
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", a.key, val))
 	}

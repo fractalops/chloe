@@ -19,7 +19,11 @@ type keyMap struct {
 
 // ShortHelp implements help.KeyMap.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.Tab, k.Quit}
+	return []key.Binding{
+		k.Up, k.Down, k.Enter, k.Tab,
+		k.Filter, k.Resume, k.New, k.Group, k.Refresh,
+		k.OpenFiles, k.Escape, k.Quit,
+	}
 }
 
 // FullHelp implements help.KeyMap.
